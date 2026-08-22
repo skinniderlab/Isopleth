@@ -1,3 +1,12 @@
+"""
+Dataset class and functions used to train Isopleth
+
+This file converts paired training data (isotopic labelling patterns for peaks
+corresponding to known metabolites and chemical fingerprints for those
+metabolites' structures) into tensors for input to the contrastive learning
+model.
+"""
+
 import numpy as np
 import pandas as pd
 import torch
@@ -10,25 +19,71 @@ def collate_fn(batch):
     """
     Custom collate function for pattern-fingerprint pairs.
 
-    Returns:
-        patterns: (batch_size, num_labels) tensor
-        true_fps: (batch_size, fp_length) tensor
+    Parameters
+    ----------
+    batch : list of tuple
+        Items returned by `IsotopicPatternDataset.__getitem__`. Each item is
+        `(pattern, true_fp)`, where `pattern` has shape `(num_labels,)` and
+        `true_fp` has shape `(fp_length,)`.
+
+    Returns
+    -------
+    tuple of torch.Tensor
+        `patterns` with shape `(batch_size, num_labels)` and `true_fps`
+        with shape `(batch_size, fp_length)`.
     """
     patterns, true_fps = zip(*batch)
     return torch.stack(patterns), torch.stack(true_fps)
 
 class IsotopicPatternDataset(Dataset):
     """
-    A dataset containing isotopic labelling patterns for a set of peaks
-    and ground-truth structures for each peak.
+    Dataset of isotopic labelling patterns paired with ground-truth structures.
 
-    Each item represents a peak, with:
-    - an observed labelling pattern
-    - the fingerprint of the ground-truth structure
+    Each item represents one peak and contains an observed labelling
+    pattern paired together with the fingerprint of that peak's ground-truth
+    chemical structure.
+
+    Input files
+    -----------
+    label_file : str
+        matrix in csv format with peak_ids as the row index and isotopologue-level 
+        labelling pattern features (i.e., specific numbers of carbon atoms
+        from each tracer administered to mice; for example, 13C2-Tau) as 
+        columns.
+    struct_file : str
+        structure metadata table in csv format with one row per peak. Rows 
+        must be in the same order as `label_file` and must include 
+        `canonical_smiles` and `InChIKey` columns.
+
+    Items
+    -----
+    pattern : torch.Tensor
+        Labelling-pattern vector with shape `(num_labels,)`.
+    true_fp : torch.Tensor
+        Ground-truth structure fingerprint with shape `(fp_length,)`.
     """
     
     def __init__(self, config, label_file, struct_file, device,
                  val_split=0.1, seed=0):
+        """
+        Load paired training data and create train/validation splits.
+
+        Parameters
+        ----------
+        config : Config
+            Configuration containing the fingerprint settings.
+        label_file : str
+            Path to the labelling-pattern .csv matrix.
+        struct_file : str
+            Path to the ground-truth structure metadata .csv
+        device : torch.device
+            Device on which returned tensors are stored.
+        val_split : float, default=0.1
+            Validation split fraction.
+        seed : int, default=0
+            Random seed used for the train/validation split and validation batch
+            sampling.
+        """
         self.config = config
         self.label_file = label_file
         self.struct_file = struct_file
@@ -92,6 +147,20 @@ class IsotopicPatternDataset(Dataset):
         self._val_rng.manual_seed(self.seed)
     
     def get_fingerprint_matrix(self, smiles_list):
+        """
+        Compute fingerprints for a list of SMILES strings.
+
+        Parameters
+        ----------
+        smiles_list : iterable of str
+            SMILES strings for the ground-truth structures.
+
+        Returns
+        -------
+        pandas.DataFrame
+            Fingerprint matrix with one row per SMILES string and `fp_length`
+            columns.
+        """
         mols = clean_mols(smiles_list)
         fps = np.vstack([
             get_fingerprint(mol=mol,
@@ -105,15 +174,62 @@ class IsotopicPatternDataset(Dataset):
         return pd.DataFrame(fps, columns=fp_cols)
     
     def num_labels(self):
+        """
+        Return the number of isotopologue-level labelling pattern features 
+        (i.e., specific numbers of carbon atoms from each tracer administered 
+        to mice; for example, 13C2-Tau)
+
+        Returns
+        -------
+        int
+            Number of columns in the labelling-pattern matrix after filtering.
+        """
         return self.label_df.shape[1]
     
     def __len__(self):
+        """
+        Return the number of training examples.
+
+        Returns
+        -------
+        int
+            Number of items in the training set.
+        """
         return len(self.train_items)
     
     def __getitem__(self, idx):
+        """
+        Return one training example.
+
+        Parameters
+        ----------
+        idx : int
+            Position within the training set.
+
+        Returns
+        -------
+        tuple of torch.Tensor
+            `(pattern, true_fp)`, where `pattern` has shape
+            `(num_labels,)` and `true_fp` has shape `(fp_length,)`.
+        """
         return self.train_items[idx]
     
     def get_validation(self, batch_size):
+        """
+        Sample a validation batch.
+
+        Parameters
+        ----------
+        batch_size : int
+            Maximum number of validation examples to sample. 
+
+        Returns
+        -------
+        tuple of torch.Tensor
+            `patterns` with shape `(n_validation, num_labels)` and
+            `true_fps` with shape `(n_validation, fp_length)`, where
+            `n_validation` is at most `batch_size`.
+        """
         indices = torch.randperm(len(self.val_items),
                                  generator=self._val_rng)[:batch_size]
         items = [self.val_items[i] for i in indices]

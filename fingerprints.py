@@ -1,18 +1,32 @@
+"""
+Fingerprint generation for chemical structures.
+"""
+
 import numpy as np
 from rdkit import Chem, DataStructs
 from rdkit.Chem import rdFingerprintGenerator as fpg
 
 def get_fingerprint(mol, fp_algo, fp_type, length, radius):
     """
-    Generate a chemical fingerprint from a RDKit molecule object.
+    Generate a fixed-length chemical fingerprint from an RDKit molecule object.
 
-    Parameters:
-    - mol: RDKit molecule object
-    - fp_algo: type of fingerprint to generate; one of 'ecfp', 'fcfp'
-    - fp_type: one of 'bits' (binary fingerprint) or 'counts' (count
-      fingerprint)
-    - length: length of the fingerprint (number of bit/counts)
-    - radius: radius of the fingerprint
+    Parameters
+    ----------
+    mol : rdkit.Chem.Mol
+        RDKit molecule object.
+    fp_algo : {'ecfp', 'fcfp'}
+        Fingerprint algorithm.
+    fp_type : {'bits', 'counts'}
+        Fingerprint representation.
+    length : int
+        Length of the fingerprint.
+    radius : int
+        Radius of the fingerprint.
+
+    Returns
+    -------
+    numpy.ndarray
+        One-dimensional `float32` array of length `length`.
     """
     fp_arr = np.zeros((length,), dtype=np.float32)
 

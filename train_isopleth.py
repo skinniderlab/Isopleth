@@ -1,6 +1,33 @@
 """
 Train a contrastive learning model to co-embed labelling patterns and chemical
-structures of known metabolites, and make predictions for held-out peaks.
+structures of known metabolites, and make predictions for held-out metabolites.
+Candidate structures are ranked by cosine similiarty in the joint embedding space. 
+
+Input files
+-----------
+train_mat_file
+    matrix in csv format with peak_ids as the row index and isotopologue-level 
+    labelling pattern features (i.e., specific numbers of carbon atoms
+    from each tracer administered to mice; for example, 13C2-Tau) as 
+    columns.
+train_file
+    structure metadata table in csv format with one row per peak. Rows 
+    must be in the same order as `label_file` and must include 
+    `canonical_smiles` and `InChIKey` columns.
+test_mat_file
+    same as train_mat_file, but for peaks to score
+test_cands_file
+    candidate structures for test peaks in csv format. Requires columns 
+    peak_id and candidate_smiles.
+
+Output files
+------------
+model_file
+    PyTorch state_dict for the checkpoint with the lowest validation loss.
+loss_file
+    .csv log of training and validation losses.
+pred_file
+    Candidate rankings with peak_id, candidate_smiles, cosine, and rank.
 """
 
 import argparse
@@ -29,7 +56,8 @@ from models import Isopleth
 
 
 # CLI
-parser = argparse.ArgumentParser()
+parser = argparse.ArgumentParser(
+    description='Train Isopleth and rank candidate structures for test peaks')
 
 # fingerprint configuration
 parser.add_argument('--fp_algo', type=str, required=True,
@@ -79,7 +107,7 @@ parser.add_argument('--time_file', type=str, required=True)
 args = parser.parse_args()
 print(args)
 
-# create config
+# create config 
 config = Config(
     fp_algo=args.fp_algo,
     fp_type=args.fp_type,
@@ -177,7 +205,7 @@ early_stop = EarlyStopping(patience=config.get_param('patience'),
 
 train_start_time = time.time()
 
-# training loop
+# start training loop:
 counter = 0
 for epoch in range(0, config.get_param('max_epochs')):
     for batch_idx, batch in tqdm(enumerate(loader), total=len(loader)):
@@ -242,7 +270,7 @@ model.eval()
 
 test_labels = pd.read_csv(args.test_mat_file, index_col=0)
 test_cands = pd.read_csv(args.test_cands_file)
-test_cands = test_cands.dropna(subset=['canonical_smiles', 'candidate_smiles'])
+test_cands = test_cands.dropna(subset=['candidate_smiles'])
 
 print(f'computing fingerprints for {len(test_cands)} test candidates...')
 test_mols = clean_mols(test_cands['candidate_smiles'].values)

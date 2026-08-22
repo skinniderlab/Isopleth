@@ -1,5 +1,25 @@
 """
-Evaluate isopleth model predictions on held-out labelling patterns.
+Evaluate Isopleth candidate rankings for held-out peaks.
+
+This script compares predicted candidate structures against the ground-truth 
+structure for each peak. It reports the rank of the correct structure, the 
+Tanimoto coefficient of the top-ranked candidate, and the number of
+candidate structures evaluated for each peak.
+
+Input files
+-----------
+test_file
+    .csv metadata table with one row per held-out peak. Requires `peak_id`,
+    `canonical_smiles`, and `InChIKey` columns.
+pred_file
+    .csv file of Isopleth predictions. Requires `peak_id`,
+    `candidate_smiles`, and `cosine` columns.
+
+Output file
+-----------
+eval_file
+    .csv table with `peak_id`, `rank_inchi`, `top1_tc`, and
+    `n_candidates` columns.
 """
 
 import argparse

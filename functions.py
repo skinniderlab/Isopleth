@@ -1,10 +1,30 @@
+"""
+Utility functions for parsing and standardizing chemical structures from SMILES
+"""
+
 from rdkit import Chem
 from tqdm import tqdm
 
 def clean_mol(smiles, stereochem=False):
     """
-    Construct a molecule from a SMILES string, removing stereochemistry and
-    explicit hydrogens, and setting aromaticity.
+    Convert a SMILES string to a standardized RDKit molecule.
+
+    Parameters
+    ----------
+    smiles : str
+        SMILES representation of a candidate or reference structure.
+    stereochem : bool, default=False
+        If False, remove stereochemistry from molecule. 
+
+    Returns
+    -------
+    rdkit.Chem.Mol
+        Sanitized molecule with hydrogens removed and aromaticity set.
+
+    Raises
+    ------
+    ValueError
+        If RDKit cannot parse the input SMILES string.
     """
     mol = Chem.MolFromSmiles(str(smiles))
     if mol is None:
@@ -17,8 +37,19 @@ def clean_mol(smiles, stereochem=False):
 
 def clean_mols(all_smiles, stereochem=False):
     """
-    Construct a list of molecules from a list of SMILES strings, replacing
-    invalid molecules with None in the list.
+    Convert a list of SMILES strings to standardized RDKit molecules.
+   
+    Parameters
+    ----------
+    all_smiles : iterable of str
+        SMILES strings to parse.
+    stereochem : bool, default=False
+        Passed to clean_mol()
+
+    Returns
+    -------
+    list
+        RDKit molecule objects, with None in positions where parsing failed.
     """
     mols = []
     for smiles in tqdm(all_smiles):

@@ -22,7 +22,7 @@ class EarlyStopping():
     because the size of an epoch will not be consistent if the size of the
     dataset changes.
 
-    Inspired by:
+    Inspired by/adapted from:
     https://github.com/Bjarten/early-stopping-pytorch
     https://github.com/fastai/fastai/blob/master/courses/dl2/imdb_scripts/finetune_lm.py
     """
