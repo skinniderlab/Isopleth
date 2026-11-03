@@ -52,6 +52,7 @@ from sklearn.preprocessing import StandardScaler
 # add script directory to path so sibling modules are importable
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from metalearning_datasets import MetaLearningDataset
+from metalearning_datasets import meta_learning_features
 
 # CLI
 parser = argparse.ArgumentParser()
@@ -104,3 +105,10 @@ pred_cols = ['peak_id', 'candidate_smiles', 'candidate_inchikey',
              'cosine', 'ml_prob', 'ml_rank', 'match']
 test_feat[[c for c in pred_cols if c in test_feat.columns]].sort_values(
     ['peak_id', 'ml_rank']).to_csv(args.pred_file, index=False)
+
+classifier = pipeline.named_steps['classifier']
+pd.DataFrame({
+    'feature': meta_learning_features,
+    'importance': classifier.feature_importances_,
+}).sort_values('importance', ascending=False).to_csv(
+    args.coef_file, index=False)

@@ -99,9 +99,11 @@ parser.add_argument('--train_mat_file', type=str, required=True)
 parser.add_argument('--train_file', type=str, required=True)
 parser.add_argument('--test_mat_file', type=str, required=True)
 parser.add_argument('--test_cands_file', type=str, required=True)
+parser.add_argument('--meta_test_cands_file', type=str)
 parser.add_argument('--model_file', type=str, required=True)
 parser.add_argument('--loss_file', type=str, required=True)
 parser.add_argument('--pred_file', type=str, required=True)
+parser.add_argument('--meta_pred_file', type=str)
 parser.add_argument('--time_file', type=str, required=True)
 
 args = parser.parse_args()
@@ -269,58 +271,70 @@ model.load_state_dict(torch.load(args.model_file))
 model.eval()
 
 test_labels = pd.read_csv(args.test_mat_file, index_col=0)
-test_cands = pd.read_csv(args.test_cands_file)
-test_cands = test_cands.dropna(subset=['candidate_smiles'])
 
-print(f'computing fingerprints for {len(test_cands)} test candidates...')
-test_mols = clean_mols(test_cands['candidate_smiles'].values)
-test_cand_fps = np.vstack([
-    get_fingerprint(mol=mol,
-                    fp_algo=config.get_param('fp_algo'),
-                    fp_type=config.get_param('fp_type'),
-                    length=config.get_param('fp_length'),
-                    radius=config.get_param('fp_radius'))
-    for mol in test_mols
-])
 
-results = []
-unique_peak_ids = test_labels.index.unique()
-with torch.no_grad():
-    for peak_id in tqdm(unique_peak_ids, desc='predicting'):
-        pattern = test_labels.loc[peak_id]
-        if isinstance(pattern, pd.DataFrame):
-            pattern = pattern.iloc[0]
-        pattern = pattern.values.astype(np.float32)
-        pattern_tensor = torch.from_numpy(pattern).to(device).unsqueeze(0)
-        
-        peak_cands = test_cands[test_cands['peak_id'] == peak_id]
-        if len(peak_cands) == 0:
-            continue
-        
-        cand_indices = peak_cands.index
-        cand_fps = test_cand_fps[test_cands.index.get_indexer(cand_indices)]
-        cand_fps_tensor = torch.from_numpy(
-            cand_fps.astype(np.float32)).to(device)
-        
-        patt_emb = model.encode_patterns(pattern_tensor)
-        cand_embs = model.encode_fingerprints(cand_fps_tensor)
-        
-        similarities = (cand_embs @ patt_emb.T).squeeze(-1).cpu().numpy()
-        ranks = (-similarities).argsort().argsort() + 1
-        
-        for j, (idx, row) in enumerate(peak_cands.iterrows()):
-            results.append({
-                'peak_id': peak_id,
-                'candidate_smiles': row['candidate_smiles'],
-                'cosine': float(similarities[j]),
-                'rank': int(ranks[j]),
-                'match': row['match'] if 'match' in row else np.nan,
-            })
+def score_candidates(cands_file, pred_file):
+    """Score one candidate universe without changing its batch composition."""
+    test_cands = pd.read_csv(cands_file)
+    test_cands = test_cands.dropna(subset=['candidate_smiles'])
 
-results_df = pd.DataFrame(results).sort_values(['peak_id', 'rank'])
-results_df.to_csv(args.pred_file, index=False)
-print(f'wrote predictions for {len(results_df)} of {len(test_cands)} rows '
-      f'to {args.pred_file}')
+    print(f'computing fingerprints for {len(test_cands)} test candidates...')
+    test_mols = clean_mols(test_cands['candidate_smiles'].values)
+    test_cand_fps = np.vstack([
+        get_fingerprint(mol=mol,
+                        fp_algo=config.get_param('fp_algo'),
+                        fp_type=config.get_param('fp_type'),
+                        length=config.get_param('fp_length'),
+                        radius=config.get_param('fp_radius'))
+        for mol in test_mols
+    ])
+
+    results = []
+    with torch.no_grad():
+        for peak_id in tqdm(test_labels.index.unique(), desc='predicting'):
+            pattern = test_labels.loc[peak_id]
+            if isinstance(pattern, pd.DataFrame):
+                pattern = pattern.iloc[0]
+            pattern = pattern.values.astype(np.float32)
+            pattern_tensor = torch.from_numpy(pattern).to(device).unsqueeze(0)
+
+            peak_cands = test_cands[test_cands['peak_id'] == peak_id]
+            if len(peak_cands) == 0:
+                continue
+
+            cand_indices = peak_cands.index
+            cand_fps = test_cand_fps[
+                test_cands.index.get_indexer(cand_indices)]
+            cand_fps_tensor = torch.from_numpy(
+                cand_fps.astype(np.float32)).to(device)
+
+            patt_emb = model.encode_patterns(pattern_tensor)
+            cand_embs = model.encode_fingerprints(cand_fps_tensor)
+            similarities = (
+                cand_embs @ patt_emb.T).squeeze(-1).cpu().numpy()
+            ranks = (-similarities).argsort().argsort() + 1
+
+            for j, (_, row) in enumerate(peak_cands.iterrows()):
+                results.append({
+                    'peak_id': peak_id,
+                    'candidate_smiles': row['candidate_smiles'],
+                    'cosine': float(similarities[j]),
+                    'rank': int(ranks[j]),
+                    'match': row['match'] if 'match' in row else np.nan,
+                })
+
+    results_df = pd.DataFrame(results).sort_values(['peak_id', 'rank'])
+    results_df.to_csv(pred_file, index=False)
+    print(f'wrote predictions for {len(results_df)} of {len(test_cands)} rows '
+          f'to {pred_file}')
+
+
+score_candidates(args.test_cands_file, args.pred_file)
+if bool(args.meta_test_cands_file) != bool(args.meta_pred_file):
+    raise ValueError(
+        'meta_test_cands_file and meta_pred_file must be supplied together')
+if args.meta_test_cands_file:
+    score_candidates(args.meta_test_cands_file, args.meta_pred_file)
 
 # write timing
 load_time = train_start_time - start_time

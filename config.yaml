@@ -1,0 +1,65 @@
+# Input data for a complete run 
+# The code can be run in two different modes - either using the preprocessing steps, 
+# which generate the input files, or directly by using the preprocessed-inputs for model training. 
+# Preprocessing includes taking the features from the mouse tissue metabolomics dataset
+# and annotating these features based on chemical standards and NetID annotations. 
+#
+# If users are planning to implement their own data into the Snakemake workflow, 
+# the inputs provided in the folder data/workflow_inputs can be used as templates. 
+
+preprocessing:
+  enabled: false # true, if preprocessing shall be done
+  output_dir: data/generated_workflow_inputs
+  peaks: data/preprocessing_inputs/mouse_tissue_metabolomics_dataset.csv
+  standards: data/preprocessing_inputs/matched_standards_to_mouse.csv
+  hmdb: data/preprocessing_inputs/HMDB5-metabolites-from-xml-canonical.csv.gz
+  labelling_matrix: data/preprocessing_inputs/labelling_matrix.csv.gz
+  fold_assignments: data/preprocessing_inputs/fold_assignments.csv.gz
+
+# Input data for the modelling workflow
+inputs:
+  split: data/workflow_inputs/split.csv
+  cv_assignments: data/workflow_inputs/cv_test_assignments.csv.gz
+  train_structures: data/workflow_inputs/train.csv.gz
+  train_patterns: data/workflow_inputs/train.mat.gz
+  test_patterns: data/workflow_inputs/test.mat.gz
+  candidates: data/workflow_inputs/feature-table.csv.gz
+  metalearning_train: data/workflow_inputs/metalearning-train.csv.gz
+
+# Define work and output directories 
+output_dir: results
+work_dir: .snakemake/isopleth
+
+folds: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+
+# Hyperparameters
+training:
+  fp_algo: ecfp
+  fp_type: bits
+  fp_length: 2048
+  fp_radius: 3
+  emb_dim: 1024
+  fp_hidden_dim: 1024
+  patt_hidden_dim1: 512
+  patt_hidden_dim2: 512
+  tau_clip: 0.1
+  batch_size: 256
+  seed: 0
+  learning_rate: 0.0001
+  patience: 1000
+  ema_alpha: 0.1
+  max_grad_norm: 1.0
+  max_steps: 1000000000
+  max_epochs: 1000000000
+  log_every_steps: 50
+  log_every_epochs: 1
+
+metalearning:
+  enabled: false # true, if the meta-learning model should be trained
+  seed: 0
+  n_estimators: 100
+
+resources:
+  threads: 1
+  gpu: 1
+  mem_mb: 64000

@@ -101,7 +101,14 @@ class MetaLearningDataset():
         
         train_feat['peak_id'] = train_feat['peak_id'].astype(str)
         test_feat['peak_id'] = test_feat['peak_id'].astype(str)
-        
+
+        # drop peaks for which there is no ground-truth structure
+        nan_peaks = (
+            train_feat.groupby('peak_id')['match']
+            .apply(lambda x: x.isna().all()))
+        nan_peaks = nan_peaks[nan_peaks].index
+        train_feat = train_feat[~train_feat['peak_id'].isin(nan_peaks)]
+
         train_feat = _merge_cosines(train_feat, self.train_cosine_file,
                                     'train')
         test_feat = _merge_cosines(test_feat, self.test_cosine_file,
@@ -121,13 +128,6 @@ class MetaLearningDataset():
         train_feat['n_overlap'] = train_feat['n_overlap'].replace(-np.inf, 0)
         test_feat['n_overlap'] = test_feat['n_overlap'].replace(-np.inf, 0)
 
-        # drop peaks for which there is no ground-truth structure
-        nan_peaks = (
-            train_feat.groupby('peak_id')['match']
-            .apply(lambda x: x.isna().all()))
-        nan_peaks = nan_peaks[nan_peaks].index
-        train_feat = train_feat[~train_feat['peak_id'].isin(nan_peaks)]
-        
         self.train_feat = train_feat
         self.test_feat = test_feat
         print(f'loaded {len(self.train_feat)} train and {len(self.test_feat)} '

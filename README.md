@@ -1,10 +1,10 @@
 # Isopleth
 
-Isopleth is a contrastive learning model that maps labelling patterns and chemical structures into a shared embedding space, placing labelling patterns for each metabolite near their corresponding structures while pushing unpaired patterns and structures apart. After model training, candidate structures for unidentified peaks are ranked by their cosine similarity to the corresponding labelling patterns for those peaks within this learned embedding space.
+Isopleth is a contrastive learning model that maps labelling patterns and chemical structures into a shared embedding space, placing labelling patterns for each metabolite near their corresponding structures while pushing unpaired patterns and structures apart. After model training, candidate structures for unidentified (and potentially novel) peaks are ranked by their cosine similarity to the corresponding labelling patterns for those peaks within this learned embedding space.
 
-This repository also includes a meta-learning model that combines the Isopleth cosine similarity score with features derived from DeepMet, predicted retention times, and predicted MS/MS spectra for each candidate.
+This repository also includes a meta-learning model that combines the Isopleth cosine similarity score with features derived from DeepMet (Qiang, H., Wang, F., Lu, W. et al. Language model-guided anticipation and discovery of mammalian metabolites. Nature 651, 211–220 (2026). https://doi.org/10.1038/s41586-025-09969-x), predicted retention times, and predicted MS/MS spectra for each candidate.
 
-Predictions for all 6,651 peaks (the subset of all 8,277 peaks with at least one DeepMet-generated candidate structure; predictions made in cross-validation) are provided in `data/isopleth_predictions.csv.gz`. Predictions made by the meta-learning model for the same set of 6,651 peaks in cross-validation are provided in `data/metalearning_predictions.csv.gz`.
+Predictions for all 6,651 peaks (the subset of all 8,277 peaks with at least one DeepMet-generated candidate structure; predictions made in cross-validation for annotated peaks) are provided in `data/published_results/isopleth_predictions.csv.gz`. Predictions made by the meta-learning model for the same set of 6,651 peaks (in cross-validation, for annotated peaks) are provided in `data/published_results/metalearning_predictions.csv.gz`.
 
 The experiments described in the manuscript were carried out in the conda environment specified in `environment.yaml`.
 
@@ -12,6 +12,69 @@ The experiments described in the manuscript were carried out in the conda enviro
 
 `train_isopleth.py` trains a contrastive learning model and makes predictions on a set of withheld peaks.
 
+`train_metalearning.py` trains a random forest model using additional features beyond the isotope tracing data (derived from DeepMet, predicted retention times, predicted MS/MS spectra, and Isopleth) and scores candidate structures for a set of withheld peaks.
+
 `evaluate.py` quantifies the performance of the contrastive learning model in the held-out test set using various metrics (e.g. top-k accuracy, top-1 Tanimoto coefficient to the ground-truth structure).
 
-`train_metalearning.py` trains a random forest model using additional features beyond the isotope tracing data (derived from DeepMet, predicted retention times, predicted MS/MS spectra, and Isopleth) and scores candidate structures for a set of withheld peaks.
+`make_predictions.py` makes predictions for candidate structures and their respective labelling pattern using the pretrained Isopleth-model.
+
+## How to run the code 
+
+The design and implementation of Isopleth are specific to the large-scale isotope tracing experiment described by MacArthur*, Raeber*, Lu* et al. (_bioRxiv_ 2026, doi: [10.64898/2026.03.31.713900](https://www.biorxiv.org/content/10.64898/2026.03.31.713900v1)), in which 26 isotopically labelled nutrients were administered to mice. Readers should be aware that Isopleth was not designed for (and has not been tested with) conventional isotope tracing studies, which historically have typically monitored just one or two tracers. Nonetheless, to assist readers in understanding our methodology, we provide a Snakemake pipeline to reproduce our model training and inference. Ready-to-use workflow inputs are available in `data/workflow_inputs/`. Set `preprocessing.enabled` in `config.yaml` to `false` to use these files directly (they can also be used as a template structure for training the model with external data from scratch), or to `true` to regenerate the peak annotations, fold tables, and labelling matrices from `data/preprocessing_inputs/` before model training. Note that because training is not deterministic and will vary slightly depending on the hardware on which Isopleth is trained, users should expect small differences between the output of their retrained models and the precomputed predictions provided in this repository.
+
+`data/workflow_inputs/split.csv` contains all annotated peaks used in this study, including their identifiers, their InChIKeys, and the means by which the peak was annotated (i.e., standard, mass spectrometry artifact, NetID). `data/workflow_inputs/cv_test_assignments.csv.gz` contains the annotated peak identifier and its respective fold used for cross-validation testing and excludes the 231 standards, which are used for evaluation only.
+
+For training, the annotated structures are provided with `data/workflow_inputs/train.csv.gz` and the isotopologue matrix for both training and testing with `data/workflow_inputs/train.mat.gz` and `data/workflow_inputs/test.mat.gz`. Candidate structures for each peak generated by DeepMet  are provided in `data/workflow_inputs/feature-table.csv.gz`. Model parameters, preprocessing inputs, and output directories are defined in `config.yaml`. 
+
+The preprocessing step of the Snakemake workflow generates the training and test datasets and cross-validation splits. `preprocessing/` contains legacy R code for 1. the extraction of DeepMet candidates based on the DeepMet-library, 2. preparing non-MS2 features (such as retention time differences) for the meta-learning model, 3. turning FraGNNet MS2 predictions into workflow compatible MGF-files and 4. matching experimental MS2 to FraGNNet predicted MS2 from DeepMet candidates. The R code itself is not integrated into the Snakemake pipeline but is provided for transparency.
+
+During training, ten Isopleth models are trained in cross-validation and each annotated peak is scored only by the model from which it was withheld. Model evaluation is performed only with the 231 peaks identified via matches to authentic standards. An 11th model is trained on all annotated peaks and used to score candidate structures for the remaining, unannotated peaks based on their labelling patterns. 
+
+In the second part of the workflow, the model trains a random-forest meta-learning classifier based on the same ten folds. Its inputs combine the held-out Isopleth cosine scores with the DeepMet frequency, retention-time, MS/MS, and mass accuracy. An 11th model is again trained on all annotated peaks and scores the remaining, unannotated peaks. By default, the workflow trains only Isopleth. Set `metalearning.enabled` to `true` in `config.yaml` to additionally train and evaluate the meta-learning model.
+
+The snakemake workflow is configured for an HPC system that uses SLURM as its job scheduler. The execution command may need adjustments for other environments. Create and activate the supplied environment, then run the workflow from this directory:
+
+```bash
+conda env create -f environment.yaml
+conda activate isopleth-env
+snakemake --cores 1 --resources gpu=1 --slurm --jobs=100 --default-resources runtime=240 --latency-wait 60
+```
+During the run, the snakemake-workflow generates six files in the results-folder:
+
+- `results/isopleth_model.pt`: the final Isopleth model (trained on all ten folds)
+- `results/final_training_loss.csv`: log file containing training and validation losses
+- `results/isopleth_predictions.csv.gz`: predictions from Isopleth for all peaks 
+- `results/cross_validation.csv`: per-peak evaluation using only the 231 standards
+- `results/metalearning_predictions.csv.gz`: predictions from the meta-learning model for all peaks
+- `results/metalearning_cross_validation.csv`: meta-learning evaluation for
+  the 231 standards
+
+## Running the pretrained Isopleth model 
+
+We also provide a pretrained version of Isopleth for ranking candidate structures using experimentally acquired isotopic labelling patterns. The pretrained model is available at `pretrained/model.pt`. `make_predictions.py` contains functions for loading the model and parsing SMILES and labelling patterns.
+
+The SMILES input can be either a string or a list of candidate SMILES. The labelling input for those candidates is a list of tracer-isotopologue labels.
+
+Supported tracers are Serine, Histidine, Methionine, Glucose, Cysteine, Arginine, Tryptophan, Threonine, Isoleucine, Valine, Lysine, Leucine, Proline, Linoleic acid, Glycine, Taurine, Thiamine, Riboflavin, Pantothenate, Oleate, Fructose, Phenylalanine, Palmitate, Glutamine, Mevalonate, and Acetate. Supported isotopologues are `13C1` through `13C30`.
+
+After creating and activating the supplied environment, run the following Python code from the `Isopleth` directory:
+
+```Python
+from make_predictions import load_model, score_predictions
+
+# Example run
+smiles = ["CC(O)C(=O)NCCS(=O)(=O)O", "COS(=O)(=O)OCCNC(C)=O", "CCC(=O)NCCOS(=O)(=O)O", "CC(=O)NCCS(=O)(=O)OCO"]
+labelling = ["Glucose 13C3", "Taurine 13C2"]
+
+isopleth = load_model("pretrained/model.pt")
+predictions = score_predictions(
+    model=isopleth,
+    smiles=smiles,
+    labelling=labelling,
+)
+
+print(predictions)
+```
+
+
+
